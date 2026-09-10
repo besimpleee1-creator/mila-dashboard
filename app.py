@@ -2,6 +2,7 @@ import hashlib
 import io
 import os
 import re
+import sys
 from datetime import datetime
 
 import numpy as np
@@ -18,6 +19,10 @@ DEFAULT_SRC = os.environ.get(
 )
 # Как часто проверять источник на изменения (секунды).
 WATCH_INTERVAL = int(os.environ.get("MILA_WATCH_INTERVAL", "15"))
+
+
+def log(msg: str) -> None:
+    print(msg, flush=True)
 
 DAY_NAME_RU = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 PALETTE = ["#E8F0FE", "#7BA7D9", "#1F3A5F"]
@@ -60,9 +65,12 @@ def fetch_bytes(src: str) -> bytes:
     last_err = None
     for url in urls:
         try:
+            log(f"[fetch] GET {url}")
             r = requests.get(url, headers=headers, timeout=90)
+            log(f"[fetch] status={r.status_code} ctype={r.headers.get('Content-Type')}")
             r.raise_for_status()
             data = r.content
+            log(f"[fetch] len={len(data)} magic={data[:4]!r}")
             if data[:2] == b"PK":
                 return data
             raise ValueError(
@@ -70,6 +78,7 @@ def fetch_bytes(src: str) -> bytes:
                 "(возможно, страницу входа Google)"
             )
         except Exception as exc:
+            log(f"[fetch] attempt failed: {type(exc).__name__}: {exc}")
             last_err = exc
     raise RuntimeError(f"Не удалось скачать книгу по адресу: {last_err}")
 
@@ -123,6 +132,7 @@ def parse_workbook(data: bytes) -> pd.DataFrame:
                 i += 1
 
     df = pd.DataFrame(records)
+    log(f"[parse] sheets={len(xls.sheet_names)} records={len(records)}")
     if df.empty:
         return df
 
@@ -167,6 +177,7 @@ def watch_source(src: str):
 # ─────────────────────────────────────────────────────────────
 # 3. СТРАНИЦА
 # ─────────────────────────────────────────────────────────────
+log(f"[run] start script, src={DEFAULT_SRC[:85]}")
 st.set_page_config(page_title="Мила — Статистика", page_icon="📊", layout="wide")
 
 st.markdown("""
@@ -273,6 +284,9 @@ except Exception as exc:
 if df.empty:
     st.warning("Не удалось найти данные в книге — проверьте разметку листов.")
     st.stop()
+
+log(f"[run] df shape={df.shape} employees={df['Employee'].nunique()} "
+    f"dates={df['Date'].min().date()}..{df['Date'].max().date()}")
 
 dmin, dmax = df["Date"].min().date(), df["Date"].max().date()
 
