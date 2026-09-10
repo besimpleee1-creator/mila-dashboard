@@ -1,0 +1,6 @@
+[browser]
+gatherUsageStats = false
+
+[server]
+showEmailPrompt = false
+headless = true
