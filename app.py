@@ -3,7 +3,7 @@ import io
 import os
 import re
 import sys
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -29,11 +29,11 @@ PALETTE = [
     "#F97316", "#06B6D4", "#A855F7", "#84CC16",
 ]
 KPI_META = [
-    ("⌛", "Всего часов", "#3B82F6"),
-    ("💰", "Сумма выплат", "#10B981"),
-    ("🧑‍🤝‍🧑", "Активных сотрудников", "#8B5CF6"),
-    ("🎯", "Средняя ставка", "#F59E0B"),
-    ("📈", "Средняя выработка", "#EC4899"),
+    ("⌛", "Всего часов", "#2563EB"),
+    ("💰", "Сумма выплат", "#059669"),
+    ("🧑‍🤝‍🧑", "Активных сотрудников", "#7C3AED"),
+    ("🎯", "Средняя ставка", "#D97706"),
+    ("📈", "Средняя выработка", "#DB2777"),
 ]
 
 
@@ -247,10 +247,10 @@ CSS = """
         box-shadow: 0 3px 10px rgba(31,41,85,.06); position: relative;
     }
     .kpi .ico { font-size: 22px; line-height: 1; }
-    .kpi .lbl { font-size: 12px; color: #6B7280; letter-spacing: .4px;
+    .kpi .lbl { font-size: 12px; color: #374151; letter-spacing: .4px;
                 text-transform: uppercase; margin-top: 6px; white-space: nowrap; }
     .kpi .val { font-size: 25px; font-weight: 800; margin-top: 2px; }
-    .kpi .sub { font-size: 12px; color: #6B7280; margin-top: 4px; }
+    .kpi .sub { font-size: 12px; color: #4B5563; margin-top: 4px; }
     .kpi .bar  { height: 4px; border-radius: 4px; margin-top: 10px; }
 
     .lboard-item {
@@ -261,13 +261,19 @@ CSS = """
     .lboard-medal { font-size: 20px; width: 32px; text-align: center; }
     .lboard-name { flex: 1; font-weight: 600; color: #1F2937; }
     .lboard-hours { font-size: 15px; font-weight: 700; color: #1F2937; }
-    .lboard-sum { font-size: 12px; color: #6B7280; min-width: 76px; text-align: right; }
+    .lboard-sum { font-size: 12px; color: #4B5563; min-width: 76px; text-align: right; }
     .lboard-track { position: relative; height: 6px; border-radius: 6px;
                     background: #EEF0F8; overflow: hidden; margin-top: 6px; }
 
-    .cap { color: #6B7280; font-size: 13px; margin: 4px 0 12px 0; }
+    .cap { color: #4B5563; font-size: 13px; margin: 4px 0 12px 0; }
     h1, h2, h3 { color: #1E2A5A; }
     div[data-testid="stTabs"] button p { font-weight: 600; font-size: 15px; }
+    .dossier-note {
+        background: #FFFFFF; border: 1px solid #E7EAF5; border-radius: 12px;
+        padding: 10px 16px; color: #1F2937; font-size: 14px;
+        box-shadow: 0 2px 8px rgba(31,41,85,.05);
+    }
+    .dossier-note b { color: #7C3AED; }
 </style>
 """
 
@@ -401,21 +407,60 @@ if df.empty:
 dmin, dmax = df["Date"].min().date(), df["Date"].max().date()
 
 with st.sidebar:
-    period = st.date_input(
-        "Период", [dmin, dmax], min_value=dmin, max_value=dmax
+    st.caption("🗓 Период")
+    preset = st.selectbox(
+        "Быстрый период",
+        ["Все данные", "Последние 7 дней", "Последние 30 дней",
+         "Последние 90 дней", "Последний год", "Произвольный"],
+        key="mila_preset",
+    )
+    today = date.today()
+    days_ago = {
+        "Все данные": None,
+        "Последние 7 дней": 7,
+        "Последние 30 дней": 30,
+        "Последние 90 дней": 90,
+        "Последний год": 365,
+        "Произвольный": None,
+    }[preset]
+    if days_ago is not None:
+        p0 = max(dmin, today - timedelta(days=days_ago - 1))
+        p1 = min(dmax, today)
+        st.caption(f"Сейчас фильтруется: **{p0:%d.%m.%Y} — {p1:%d.%m.%Y}**")
+        period = None
+    else:
+        period = st.date_input(
+            "Период (произвольный)", [dmin, dmax],
+            min_value=dmin, max_value=dmax, key="mila_custom_period",
+        )
+        if period and len(period) >= 2:
+            p0, p1 = period[0], period[1]
+        else:
+            p0, p1 = dmin, dmax
+
+    st.markdown("---")
+    st.caption("👤 Сотрудники")
+    all_names = sorted(df["Employee"].unique())
+    quick = st.selectbox(
+        "Быстро выбрать",
+        ["— Все сотрудники —"] + all_names,
+        key="mila_quick",
     )
     employees = st.multiselect(
-        "Сотрудники",
-        sorted(df["Employee"].unique()),
-        default=sorted(df["Employee"].unique()),
+        "Или выбрать вручную",
+        all_names,
+        default=all_names,
+        disabled=(quick != "— Все сотрудники —"),
+        key="mila_employees",
     )
+    if quick != "— Все сотрудники —":
+        employees = [quick]
+    st.caption(f"Применено сотрудников: **{len(employees)}**")
+
+    st.markdown("---")
+    st.caption("📆 Дни недели")
     day_map = {"Пн": 0, "Вт": 1, "Ср": 2, "Чт": 3, "Пт": 4, "Сб": 5, "Вс": 6}
     days = st.multiselect("Дни недели", list(day_map), default=list(day_map))
-
-if period and len(period) >= 2:
-    p0, p1 = period[0], period[1]
-else:
-    p0, p1 = dmin, dmax
 
 sel_days = [day_map[d] for d in days]
 mask = (
@@ -591,28 +636,39 @@ with tabs[1]:
         .sort_values("Часы", ascending=False)
     )
     person["Ср_в_день"] = person["Часы"] / person["Дней"].clip(lower=1)
+    person["Доля_часов"] = 100 * person["Часы"] / person["Часы"].sum()
     person["Доля_выплат"] = 100 * person["Сумма"] / person["Сумма"].sum()
     person["Часы"] = person["Часы"].round(1)
     person["Сумма"] = person["Сумма"].round(0)
     person["Ставка"] = person["Ставка"].round(0)
     person["Ср_в_день"] = person["Ср_в_день"].round(1)
+    person["Доля_часов"] = person["Доля_часов"].round(1)
+    person["Доля_выплат"] = person["Доля_выплат"].round(1)
 
-    styled = person.rename(columns={"Ср_в_день": "Ср.ч/день", "Доля_выплат": "Доля, %"})
+    styled = person.rename(columns={
+        "Ср_в_день": "Ср.ч/день", "Доля_часов": "Часы, %",
+        "Доля_выплат": "Выплаты, %",
+    })
     st.dataframe(
-        styled[["Employee", "Дней", "Часы", "Сумма", "Ставка", "Ср.ч/день", "Доля, %"]]
+        styled[["Employee", "Дней", "Часы", "Сумма", "Ставка", "Ср.ч/день",
+                "Часы, %", "Выплаты, %"]]
         .rename(columns={"Employee": "Сотрудник", "Дней": "Дней работы",
                          "Часы": "Часы, ч", "Сумма": "Сумма, ₽",
                          "Ставка": "Ставка, ₽/ч"}),
         width="stretch", hide_index=True,
         column_config={
-            "Доля, %": st.column_config.ProgressColumn(
+            "Часы, %": st.column_config.ProgressColumn(
+                "Доля часов, %", min_value=0, max_value=100, format="%.1f%%"
+            ),
+            "Выплаты, %": st.column_config.ProgressColumn(
                 "Доля выплат, %", min_value=0, max_value=100, format="%.1f%%"
             ),
         },
     )
     st.markdown(
-        "<div class='cap'>Кто больше всех работает и сколько это стоит. "
-        "Столбец «Доля выплат» — процент от всех выплат за период.</div>",
+        "<div class='cap'>«Доля часов/выплат» — сколько процентов от всей "
+        "команды приходится на человека за период. «Ср.ч/день» — его обычный "
+        "объём работы в день.</div>",
         unsafe_allow_html=True,
     )
 
@@ -625,21 +681,35 @@ with tabs[1]:
     )
     person_df = f[f["Employee"] == pick]
     days_n = person_df["Date"].nunique()
+    total_days_in_period = (p1 - p0).days + 1
     h_sum = person_df["Hours"].sum()
     a_sum = person_df["Amount"].sum()
     rate = person_df["Rate"].iloc[0]
-    stars = person_df["Star"].sum()
-    d1, d2, d3, d4, d5 = st.columns(5)
+    avg_day = h_sum / days_n if days_n else 0
+    stars = int(person_df["Star"].sum())
+    share_h = 100 * h_sum / total_h if total_h else 0
+    share_a = 100 * a_sum / total_a if total_a else 0
+    weeks_worked = person_df["WeekStart"].nunique()
+
+    d1, d2, d3, d4, d5, d6 = st.columns(6)
     stats = [
-        ("⌛", "Часов", fmt_hours(h_sum), "#3B82F6"),
-        ("💰", "Выплат", fmt_rub(a_sum), "#10B981"),
-        ("🎯", "Ставка", fmt_rub(rate), "#F59E0B"),
-        ("📅", "Дней работы", str(days_n), "#8B5CF6"),
-        ("🚫", "Пропусков (*)", str(int(stars)), "#EF4444"),
+        ("⌛", "Часов", fmt_hours(h_sum), "#2563EB"),
+        ("💰", "Выплат", fmt_rub(a_sum), "#059669"),
+        ("📅", "Дней работы", str(days_n), "#7C3AED"),
+        ("🎯", "Ср. ч/день", fmt_hours(avg_day), "#D97706"),
+        ("🗓", "Недель в работе", str(weeks_worked), "#0891B2"),
+        ("🚫", "Пропусков (*)", str(stars), "#DC2626"),
     ]
-    for col, (icon, lbl, val, color) in zip([d1, d2, d3, d4, d5], stats):
+    for col, (icon, lbl, val, color) in zip([d1, d2, d3, d4, d5, d6], stats):
         with col:
             st.markdown(kpi_card(icon, lbl, val, "", color), unsafe_allow_html=True)
+
+    st.markdown(
+        f"<div class='dossier-note'>Вклад в команду за период: "
+        f"<b>{share_h:.1f}%</b> всех часов и <b>{share_a:.1f}%</b> всех выплат. "
+        f"Работал(-а) <b>{days_n}</b> из {total_days_in_period} дней периода.</div>",
+        unsafe_allow_html=True,
+    )
 
     st.markdown("<br>", unsafe_allow_html=True)
     cA, cB = st.columns([3, 2])
