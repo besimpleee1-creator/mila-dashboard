@@ -144,16 +144,21 @@ def parse_workbook(data: bytes) -> pd.DataFrame:
     return df
 
 
-def snapshot(src: str) -> tuple:
-    """Скачивает книгу и возвращает (payload, sha1-хэш)."""
+def data_hash(df: pd.DataFrame) -> str:
+    """Стабильный отпечаток ДАННЫХ (одинаковые данные = одинаковый хэш).
+
+    Сам файл от Google каждый раз чуть отличается (служебные поля), поэтому
+    сравнивать файлы нельзя — только сами данные.
+    """
+    if df is None or df.empty:
+        return "empty"
+    return hashlib.sha1(df.to_csv(index=False).encode("utf-8")).hexdigest()
+
+
+def load_df(src: str) -> pd.DataFrame:
+    """Скачивает книгу и разбирает её в таблицу."""
     data = fetch_bytes(src)
-    return data, hashlib.sha1(data).hexdigest()
-
-
-@st.cache_data(show_spinner=False)
-def build_frame(token: str, payload: bytes) -> pd.DataFrame:
-    """Парсит скачанную книгу. token (хэш содержимого) — ключ кэша."""
-    return parse_workbook(payload)
+    return parse_workbook(data)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -161,15 +166,21 @@ def build_frame(token: str, payload: bytes) -> pd.DataFrame:
 # ─────────────────────────────────────────────────────────────
 @st.fragment(run_every=WATCH_INTERVAL)
 def watch_source(src: str):
-    """Каждые N секунд скачивает книгу; при изменении содержимого — перерисовка всего приложения."""
+    """Каждые N секунд скачивает книгу; при изменении ДАННЫХ — перерисовка всего приложения."""
+    last = st.session_state.get("mila_polled_at")
+    if last is not None:
+        elapsed = (datetime.now() - last).total_seconds()
+        if elapsed < WATCH_INTERVAL / 2:
+            return
     try:
-        payload = fetch_bytes(src)
+        df = load_df(src)
     except Exception:
         return
-    h = hashlib.sha1(payload).hexdigest()
-    if st.session_state.get("mila_hash") != h:
-        st.session_state["mila_payload"] = payload
-        st.session_state["mila_hash"] = h
+    st.session_state["mila_polled_at"] = datetime.now()
+    h = data_hash(df)
+    if st.session_state.get("mila_data_hash") != h:
+        st.session_state["mila_df"] = df
+        st.session_state["mila_data_hash"] = h
         st.session_state["mila_fetched_at"] = datetime.now()
         st.rerun(scope="app")
 
@@ -231,17 +242,17 @@ with st.sidebar:
     )
     src = st.session_state["mila_src"]
 
-    # Скачиваем книгу при старте или при смене адреса
+    # Скачиваем и разбираем книгу при старте или при смене адреса
     if st.session_state.get("mila_src_state") != src:
         try:
-            payload, h = snapshot(src)
-            st.session_state["mila_payload"] = payload
-            st.session_state["mila_hash"] = h
+            df = load_df(src)
+            st.session_state["mila_df"] = df
+            st.session_state["mila_data_hash"] = data_hash(df)
             st.session_state["mila_src_state"] = src
             st.session_state["mila_fetched_at"] = datetime.now()
-        except Exception:
-            st.session_state.pop("mila_payload", None)
-            st.session_state.pop("mila_hash", None)
+        except Exception as exc:
+            log(f"[error] initial load failed: {type(exc).__name__}: {exc}")
+            st.session_state.pop("mila_df", None)
             st.session_state["mila_src_state"] = src
             st.error("Не удалось загрузить книгу по этому адресу.")
             st.caption("Проверьте, что файл открыт «по ссылке» для просмотра, "
@@ -258,11 +269,10 @@ with st.sidebar:
     )
     st.caption(
         f"<span class='badge badge-live'>🔴 LIVE</span> "
-        f"хэш данных: `{st.session_state['mila_hash'][:10]}…`",
+        f"хэш данных: `{st.session_state['mila_data_hash'][:10]}…`",
         unsafe_allow_html=True,
     )
     if st.button("🔄 Обновить сейчас", use_container_width=True):
-        build_frame.clear()
         st.session_state["mila_src_state"] = None
         st.rerun()
 
@@ -270,14 +280,11 @@ with st.sidebar:
     st.header("🔎 Фильтры")
 
 # ── Данные ────────────────────────────────────────────────────
-try:
-    df = build_frame(st.session_state["mila_hash"], st.session_state["mila_payload"])
-except Exception as exc:
-    st.error("Не удалось прочитать содержимое книги.")
-    st.caption(
-        "Возможно, Google запросил вход по ссылке. Убедитесь, что доступ "
-        "к таблице открыт «для всех, у кого есть ссылка», и обновите страницу. "
-        f"\n\nТехнически: {type(exc).__name__}: {exc}"
+df = st.session_state.get("mila_df")
+if df is None:
+    st.error(
+        "Нет данных. Откройте страницу, перезагрузите её или нажмите "
+        "«🔄 Обновить сейчас»."
     )
     st.stop()
 
