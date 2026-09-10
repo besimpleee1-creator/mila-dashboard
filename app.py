@@ -1,6 +1,7 @@
 import hashlib
 import io
 import os
+import re
 from datetime import datetime
 
 import numpy as np
@@ -26,13 +27,51 @@ PALETTE = ["#E8F0FE", "#7BA7D9", "#1F3A5F"]
 # 1. ЗАГРУЗКА ДАННЫХ: URL (Google/файл по ссылке) или локальный путь
 # ─────────────────────────────────────────────────────────────
 def fetch_bytes(src: str) -> bytes:
-    """Скачивает книгу по URL (HTTP) или читает локальный файл."""
-    if src.lower().startswith(("http://", "https://")):
-        r = requests.get(src, timeout=60)
-        r.raise_for_status()
-        return r.content
-    with open(src, "rb") as fh:
-        return fh.read()
+    """Скачивает книгу по URL (HTTP) или читает локальный файл.
+
+    Для Google-таблиц умеет подбирать рабочую форму адреса экспорта.
+    """
+    if not src.lower().startswith(("http://", "https://")):
+        with open(src, "rb") as fh:
+            return fh.read()
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 "
+            "Safari/537.36"
+        )
+    }
+
+    urls = [src]
+    sheet_id = ""
+    m1 = re.search(r"/d/([\w-]{20,})", src, re.IGNORECASE)
+    m2 = re.search(r"[?&]id=([\w-]{20,})", src)
+    if m1:
+        sheet_id = m1.group(1)
+    elif m2:
+        sheet_id = m2.group(1)
+    if sheet_id:
+        urls.append(
+            f"https://docs.google.com/spreadsheets/export"
+            f"?format=xlsx&id={sheet_id}"
+        )
+
+    last_err = None
+    for url in urls:
+        try:
+            r = requests.get(url, headers=headers, timeout=90)
+            r.raise_for_status()
+            data = r.content
+            if data[:2] == b"PK":
+                return data
+            raise ValueError(
+                "сервер вернул не книгу Excel, а другую страницу "
+                "(возможно, страницу входа Google)"
+            )
+        except Exception as exc:
+            last_err = exc
+    raise RuntimeError(f"Не удалось скачать книгу по адресу: {last_err}")
 
 
 def parse_workbook(data: bytes) -> pd.DataFrame:
@@ -220,7 +259,16 @@ with st.sidebar:
     st.header("🔎 Фильтры")
 
 # ── Данные ────────────────────────────────────────────────────
-df = build_frame(st.session_state["mila_hash"], st.session_state["mila_payload"])
+try:
+    df = build_frame(st.session_state["mila_hash"], st.session_state["mila_payload"])
+except Exception as exc:
+    st.error("Не удалось прочитать содержимое книги.")
+    st.caption(
+        "Возможно, Google запросил вход по ссылке. Убедитесь, что доступ "
+        "к таблице открыт «для всех, у кого есть ссылка», и обновите страницу. "
+        f"\n\nТехнически: {type(exc).__name__}: {exc}"
+    )
+    st.stop()
 
 if df.empty:
     st.warning("Не удалось найти данные в книге — проверьте разметку листов.")
