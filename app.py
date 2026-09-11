@@ -229,17 +229,30 @@ CSS = """
     .stApp { background: #F2F4FA; }
 
     .hero {
-        background: linear-gradient(120deg, #6366F1 0%, #8B5CF6 55%, #EC4899 100%);
-        border-radius: 20px; padding: 26px 30px; color: #ffffff;
-        box-shadow: 0 8px 24px rgba(99,102,241,.35); margin-bottom: 18px;
+        background: #FFFFFF; border: 1px solid #E7EAF5; border-radius: 18px;
+        padding: 26px 30px 18px 30px; position: relative; overflow: hidden;
+        box-shadow: 0 8px 22px rgba(31,41,85,.08); margin-bottom: 18px;
     }
-    .hero h1 { color: #ffffff; margin: 0 0 4px 0; font-size: 28px; letter-spacing: .2px; }
-    .hero p  { color: rgba(255,255,255,.92); margin: 0; font-size: 14px; }
+    .hero::before {
+        content: ""; position: absolute; inset: 0 0 auto 0; height: 5px;
+        background: linear-gradient(90deg, #4F46E5, #7C3AED, #2563EB);
+    }
+    .hero h1 { color: #1E2A5A; margin: 8px 0 4px 0; font-size: 28px;
+               letter-spacing: .2px; }
+    .hero p  { color: #4B5563; margin: 0; font-size: 14px; }
     .hero .date-chip {
-        display: inline-block; background: rgba(255,255,255,.18);
-        border: 1px solid rgba(255,255,255,.35); padding: 3px 12px;
-        border-radius: 20px; font-size: 13px; margin-top: 10px;
+        display: inline-block; background: #EEF2FF;
+        border: 1px solid #C7D2FE; color: #3730A3; padding: 3px 12px;
+        border-radius: 20px; font-size: 13px; font-weight: 600; margin-top: 10px;
     }
+    .hero .live-chip { background: #D1FAE5; border-color: #6EE7B7; color: #047857; }
+
+    .filter-line {
+        margin-top: 10px; padding: 8px 14px; background: #EEF2FF;
+        border: 1px solid #C7D2FE; border-radius: 10px; color: #3730A3;
+        font-size: 13px;
+    }
+    .filter-line b { color: #1E2A5A; }
 
     .kpi {
         background: #FFFFFF; border-radius: 16px; padding: 14px 18px;
@@ -319,6 +332,100 @@ def leaderboard_html(pairs: list, color: str, unit: str = "часов") -> str:
 
 
 # ─────────────────────────────────────────────────────────────
+# 3b. ДОСЬЕ СОТРУДНИКА (общая функция для вкладок)
+# ─────────────────────────────────────────────────────────────
+def render_dossier(pick: str):
+    person_df = f[f["Employee"] == pick]
+    days_n = person_df["Date"].nunique()
+    total_days_in_period = (p1 - p0).days + 1
+    h_sum = person_df["Hours"].sum()
+    a_sum = person_df["Amount"].sum()
+    rate = person_df["Rate"].iloc[0]
+    avg_day = h_sum / days_n if days_n else 0
+    stars = int(person_df["Star"].sum())
+    share_h = 100 * h_sum / total_h if total_h else 0
+    share_a = 100 * a_sum / total_a if total_a else 0
+    weeks_worked = person_df["WeekStart"].nunique()
+
+    d1, d2, d3, d4, d5, d6 = st.columns(6)
+    stats = [
+        ("⌛", "Часов", fmt_hours(h_sum), "#2563EB"),
+        ("💰", "Выплат", fmt_rub(a_sum), "#059669"),
+        ("📅", "Дней работы", str(days_n), "#7C3AED"),
+        ("🎯", "Ср. ч/день", fmt_hours(avg_day), "#D97706"),
+        ("🗓", "Недель в работе", str(weeks_worked), "#0891B2"),
+        ("🚫", "Пропусков (*)", str(stars), "#DC2626"),
+    ]
+    for col, (icon, lbl, val, color) in zip([d1, d2, d3, d4, d5, d6], stats):
+        with col:
+            st.markdown(kpi_card(icon, lbl, val, "", color), unsafe_allow_html=True)
+
+    st.markdown(
+        f"<div class='dossier-note'>Вклад в команду за период: "
+        f"<b>{share_h:.1f}%</b> всех часов и <b>{share_a:.1f}%</b> всех выплат. "
+        f"Работал(-а) <b>{days_n}</b> из {total_days_in_period} дней периода.</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    cA, cB = st.columns([3, 2])
+    with cA:
+        st.markdown("**📈 Часы по неделям**")
+        emp_week = (
+            person_df.groupby("WeekStart")["Hours"].sum().reset_index()
+        )
+        fig = px.line(emp_week, x="WeekStart", y="Hours", markers=True,
+                      color_discrete_sequence=["#8B5CF6"])
+        fig.update_traces(fill="tozeroy", fillcolor="rgba(139,92,246,0.12)")
+        fig.update_layout(
+            paper_bgcolor="#F2F4FA", plot_bgcolor="#FFFFFF",
+            yaxis=dict(title="Часы", gridcolor="#EEF0F8"), xaxis_title="",
+            margin=dict(l=10, r=10, t=10, b=10), font=dict(size=12),
+        )
+        fig.update_xaxes(tickformat="%d.%m")
+        st.plotly_chart(fig, width="stretch")
+    with cB:
+        st.markdown("**🗓 Распределение по дням недели**")
+        emp_days = person_df.groupby("DayOfWeek")["Hours"].sum().reindex(
+            range(7), fill_value=0
+        )
+        fig = px.pie(values=emp_days.values,
+                     names=[DAY_NAME_RU[d] for d in range(7)], hole=0.5,
+                     color_discrete_sequence=PALETTE)
+        fig.update_layout(
+            paper_bgcolor="#F2F4FA",
+            legend=dict(orientation="h", yanchor="bottom", y=-0.3, font=dict(size=11)),
+            margin=dict(l=10, r=10, t=10, b=10),
+        )
+        st.plotly_chart(fig, width="stretch")
+
+    st.markdown("---")
+    st.markdown("**📋 Дни и суммы**")
+    detail = (
+        person_df[["Date", "DayOfWeek", "Hours", "Rate", "Amount", "Star"]]
+        .sort_values("Date")
+        .assign(День=lambda d: d["DayOfWeek"].map(lambda x: DAY_NAME_RU[x]))
+        .assign(Отметка=lambda d: np.where(d["Star"], "🚫 пропуск", "✔ работа"))
+        .drop(columns=["DayOfWeek", "Star"])
+        .rename(columns={"Date": "Дата", "Hours": "Часы", "Rate": "Ставка",
+                         "Amount": "Сумма"})
+    )
+    detail["Дата"] = detail["Дата"].dt.strftime("%d.%m.%Y")
+    detail["Сумма"] = detail["Сумма"].map(lambda x: f"{x:,.0f} ₽")
+    detail["Ставка"] = detail["Ставка"].map(lambda x: f"{x:,.0f} ₽")
+    detail["Часы"] = detail["Часы"].map(lambda x: f"{x:,.1f}".replace(",", " ").strip())
+    detail = detail.rename(columns={"Отметка": "Статус"})
+    st.dataframe(detail, width="stretch", hide_index=True)
+
+
+# ─────────────────────────────────────────────────────────────
+# 3c. КНОПКА ОБНОВЛЕНИЯ
+# ─────────────────────────────────────────────────────────────
+def _refresh_click():
+    st.session_state["mila_src_state"] = None
+
+
+# ─────────────────────────────────────────────────────────────
 # 4. СТРАНИЦА
 # ─────────────────────────────────────────────────────────────
 log(f"[run] start script, src={DEFAULT_SRC[:85]}")
@@ -346,11 +453,10 @@ if ACCESS_PIN:
                 st.error("Неверный код")
         st.stop()
 
-# ── Источник данных ──────────────────────────────────────────
+# ── Источник данных (сворачиваемый блок на странице) ─────────
 src = st.session_state.get("mila_src", DEFAULT_SRC)
 
-with st.sidebar:
-    st.header("⚙️ Источник данных")
+with st.expander("⚙️ Источник данных", expanded=False):
     st.text_input(
         "Ссылка на Google-таблицу (или путь к xlsx)",
         value=src, key="mila_src",
@@ -377,16 +483,13 @@ with st.sidebar:
     watch_source(src)
 
     fetched = st.session_state.get("mila_fetched_at")
-    st.caption(
-        f"⚡ Проверка изменений каждые {WATCH_INTERVAL} с\n\n"
-        f"Последнее обновление: {fetched:%d.%m.%Y %H:%M:%S}"
+    ref_c, ref_b = st.columns([3, 1])
+    ref_c.caption(
+        f"⚡ Автопроверка каждые {WATCH_INTERVAL} с · "
+        f"Обновлено: {fetched:%d.%m.%Y %H:%M:%S}"
     )
-    if st.button("🔄 Обновить сейчас", use_container_width=True):
-        st.session_state["mila_src_state"] = None
-        st.rerun()
-
-    st.markdown("---")
-    st.header("🔎 Фильтры")
+    ref_b.button("🔄 Обновить сейчас", use_container_width=True,
+                 on_click=_refresh_click)
 
 # ── Данные ────────────────────────────────────────────────────
 df = st.session_state.get("mila_df")
@@ -406,61 +509,68 @@ if df.empty:
 
 dmin, dmax = df["Date"].min().date(), df["Date"].max().date()
 
-with st.sidebar:
-    st.caption("🗓 Период")
-    preset = st.selectbox(
-        "Быстрый период",
-        ["Все данные", "Последние 7 дней", "Последние 30 дней",
-         "Последние 90 дней", "Последний год", "Произвольный"],
-        key="mila_preset",
-    )
-    today = date.today()
-    days_ago = {
-        "Все данные": None,
-        "Последние 7 дней": 7,
-        "Последние 30 дней": 30,
-        "Последние 90 дней": 90,
-        "Последний год": 365,
-        "Произвольный": None,
-    }[preset]
-    if days_ago is not None:
-        p0 = max(dmin, today - timedelta(days=days_ago - 1))
-        p1 = min(dmax, today)
-        st.caption(f"Сейчас фильтруется: **{p0:%d.%m.%Y} — {p1:%d.%m.%Y}**")
-        period = None
-    else:
-        period = st.date_input(
-            "Период (произвольный)", [dmin, dmax],
-            min_value=dmin, max_value=dmax, key="mila_custom_period",
+# ── Фильтры на самой странице ─────────────────────────────────
+with st.expander("🎛 Фильтры: период · сотрудники · дни", expanded=True):
+    fc1, fc2, fc3 = st.columns([1, 1, 1])
+
+    with fc1:
+        preset = st.selectbox(
+            "Быстрый период",
+            ["Все данные", "Последние 7 дней", "Последние 30 дней",
+             "Последние 90 дней", "Последний год", "Произвольный"],
+            key="mila_preset",
         )
-        if period and len(period) >= 2:
-            p0, p1 = period[0], period[1]
+        today = date.today()
+        days_ago = {
+            "Все данные": None,
+            "Последние 7 дней": 7,
+            "Последние 30 дней": 30,
+            "Последние 90 дней": 90,
+            "Последний год": 365,
+            "Произвольный": None,
+        }[preset]
+        if days_ago is not None:
+            p0 = max(dmin, today - timedelta(days=days_ago - 1))
+            p1 = min(dmax, today)
+            period = None
         else:
-            p0, p1 = dmin, dmax
+            period = st.date_input(
+                "Период (произвольный)", [dmin, dmax],
+                min_value=dmin, max_value=dmax, key="mila_custom_period",
+            )
+            if period and len(period) >= 2:
+                p0, p1 = period[0], period[1]
+            else:
+                p0, p1 = dmin, dmax
 
-    st.markdown("---")
-    st.caption("👤 Сотрудники")
-    all_names = sorted(df["Employee"].unique())
-    quick = st.selectbox(
-        "Быстро выбрать",
-        ["— Все сотрудники —"] + all_names,
-        key="mila_quick",
-    )
-    employees = st.multiselect(
-        "Или выбрать вручную",
-        all_names,
-        default=all_names,
-        disabled=(quick != "— Все сотрудники —"),
-        key="mila_employees",
-    )
-    if quick != "— Все сотрудники —":
-        employees = [quick]
-    st.caption(f"Применено сотрудников: **{len(employees)}**")
+    with fc2:
+        all_names = sorted(df["Employee"].unique())
+        quick = st.selectbox(
+            "Быстро выбрать сотрудника",
+            ["— Все сотрудники —"] + all_names,
+            key="mila_quick",
+        )
+        employees = st.multiselect(
+            "Или вручную",
+            all_names,
+            default=all_names,
+            disabled=(quick != "— Все сотрудники —"),
+            key="mila_employees",
+        )
+        if quick != "— Все сотрудники —":
+            employees = [quick]
 
-    st.markdown("---")
-    st.caption("📆 Дни недели")
-    day_map = {"Пн": 0, "Вт": 1, "Ср": 2, "Чт": 3, "Пт": 4, "Сб": 5, "Вс": 6}
-    days = st.multiselect("Дни недели", list(day_map), default=list(day_map))
+    with fc3:
+        st.caption("📆 Дни недели")
+        day_map = {"Пн": 0, "Вт": 1, "Ср": 2, "Чт": 3, "Пт": 4, "Сб": 5, "Вс": 6}
+        days = st.multiselect("Дни недели", list(day_map), default=list(day_map))
+
+    st.markdown(
+        f"<div class='filter-line'>Применено: период "
+        f"<b>{p0:%d.%m.%Y} — {p1:%d.%m.%Y}</b> · сотрудников "
+        f"<b>{len(employees)}</b> · дни <b>{', '.join(days)}</b></div>",
+        unsafe_allow_html=True,
+    )
 
 sel_days = [day_map[d] for d in days]
 mask = (
@@ -483,7 +593,7 @@ st.markdown(
         <p>Живой дашборд по данным таблицы: кто и сколько работал, сколько это стоило.</p>
         <span class="date-chip">🗓 {p0:%d.%m.%Y} — {p1:%d.%m.%Y}</span>
         <span class="date-chip">👥 {f['Employee'].nunique()} сотрудников в выборке</span>
-        <span class="date-chip">🔴 LIVE · автообновление каждые {WATCH_INTERVAL} с</span>
+        <span class="date-chip live-chip">🔴 LIVE · автообнов. каждые {WATCH_INTERVAL} с</span>
     </div>
     """,
     unsafe_allow_html=True,
@@ -522,11 +632,32 @@ st.markdown("<div class='cap'>Все показатели — за выбран�
             unsafe_allow_html=True)
 st.markdown("---")
 
-# ── Вкладки ───────────────────────────────────────────────────
-tabs = st.tabs(["📊 Обзор", "🧑‍💻 По людям", "📅 По календарю", "🚫 Пропуски (*)"])
+# ── Вкладки (динамические: при выборе сотрудника добавляется вкладка с его досье) ──
+single = None
+if quick != "— Все сотрудники —":
+    single = quick
+elif len(employees) == 1:
+    single = employees[0]
+
+tab_labels = ["📊 Обзор"]
+if single is not None:
+    tab_labels.append(f"👤 {single}")
+tab_labels += ["🧑💻 Сводка по людям", "📅 По календарю", "🚫 Пропуски (*)"]
+tabs = st.tabs(tab_labels)
+
+person_i = 1 if single is not None else -1
+summary_i = 1 if single is None else 2
+cal_i = summary_i + 1
+skip_i = cal_i + 1
 
 # ════════════════ ОБЗОР ════════════════
 with tabs[0]:
+    if single is not None:
+        st.markdown(
+            f"<div class='filter-line'>Показаны данные только сотрудника "
+            f"<b>{single}</b> — подробно о нём во вкладке «👤 {single}».</div>",
+            unsafe_allow_html=True,
+        )
     c1, c2 = st.columns([3, 2])
 
     with c1:
@@ -621,9 +752,9 @@ with tabs[0]:
             unsafe_allow_html=True,
         )
 
-# ════════════════ ПО ЛЮДЯМ ════════════════
-with tabs[1]:
-    st.subheader("🧑‍💻 Сводка по сотрудникам")
+# ════════════════ СВОДКА ПО ЛЮДЯМ ════════════════
+with tabs[summary_i]:
+    st.subheader("🧑💻 Сводка по сотрудникам")
     person = (
         f.groupby("Employee")
         .agg(
@@ -673,96 +804,23 @@ with tabs[1]:
     )
 
     st.markdown("---")
-    st.subheader("🔍 Досье сотрудника")
-    pick = st.selectbox(
-        "Выберите сотрудника",
-        sorted(f["Employee"].unique()),
-        key="mila_pick",
-    )
-    person_df = f[f["Employee"] == pick]
-    days_n = person_df["Date"].nunique()
-    total_days_in_period = (p1 - p0).days + 1
-    h_sum = person_df["Hours"].sum()
-    a_sum = person_df["Amount"].sum()
-    rate = person_df["Rate"].iloc[0]
-    avg_day = h_sum / days_n if days_n else 0
-    stars = int(person_df["Star"].sum())
-    share_h = 100 * h_sum / total_h if total_h else 0
-    share_a = 100 * a_sum / total_a if total_a else 0
-    weeks_worked = person_df["WeekStart"].nunique()
-
-    d1, d2, d3, d4, d5, d6 = st.columns(6)
-    stats = [
-        ("⌛", "Часов", fmt_hours(h_sum), "#2563EB"),
-        ("💰", "Выплат", fmt_rub(a_sum), "#059669"),
-        ("📅", "Дней работы", str(days_n), "#7C3AED"),
-        ("🎯", "Ср. ч/день", fmt_hours(avg_day), "#D97706"),
-        ("🗓", "Недель в работе", str(weeks_worked), "#0891B2"),
-        ("🚫", "Пропусков (*)", str(stars), "#DC2626"),
-    ]
-    for col, (icon, lbl, val, color) in zip([d1, d2, d3, d4, d5, d6], stats):
-        with col:
-            st.markdown(kpi_card(icon, lbl, val, "", color), unsafe_allow_html=True)
-
-    st.markdown(
-        f"<div class='dossier-note'>Вклад в команду за период: "
-        f"<b>{share_h:.1f}%</b> всех часов и <b>{share_a:.1f}%</b> всех выплат. "
-        f"Работал(-а) <b>{days_n}</b> из {total_days_in_period} дней периода.</div>",
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    cA, cB = st.columns([3, 2])
-    with cA:
-        st.markdown("**📈 Часы по неделям**")
-        emp_week = (
-            person_df.groupby("WeekStart")["Hours"].sum().reset_index()
+    if single is None:
+        st.subheader("🔍 Досье сотрудника")
+        pick = st.selectbox(
+            "Выберите сотрудника",
+            sorted(f["Employee"].unique()),
+            key="mila_pick",
         )
-        fig = px.line(emp_week, x="WeekStart", y="Hours", markers=True,
-                      color_discrete_sequence=["#8B5CF6"])
-        fig.update_traces(fill="tozeroy", fillcolor="rgba(139,92,246,0.12)")
-        fig.update_layout(
-            paper_bgcolor="#F2F4FA", plot_bgcolor="#FFFFFF",
-            yaxis=dict(title="Часы", gridcolor="#EEF0F8"), xaxis_title="",
-            margin=dict(l=10, r=10, t=10, b=10), font=dict(size=12),
-        )
-        fig.update_xaxes(tickformat="%d.%m")
-        st.plotly_chart(fig, width="stretch")
-    with cB:
-        st.markdown("**🗓 Распределение по дням недели**")
-        emp_days = person_df.groupby("DayOfWeek")["Hours"].sum().reindex(
-            range(7), fill_value=0
-        )
-        fig = px.pie(values=emp_days.values,
-                     names=[DAY_NAME_RU[d] for d in range(7)], hole=0.5,
-                     color_discrete_sequence=PALETTE)
-        fig.update_layout(
-            paper_bgcolor="#F2F4FA",
-            legend=dict(orientation="h", yanchor="bottom", y=-0.3, font=dict(size=11)),
-            margin=dict(l=10, r=10, t=10, b=10),
-        )
-        st.plotly_chart(fig, width="stretch")
+        render_dossier(pick)
 
-    st.markdown("---")
-    st.markdown("**📋 Дни и суммы**")
-    detail = (
-        person_df[["Date", "DayOfWeek", "Hours", "Rate", "Amount", "Star"]]
-        .sort_values("Date")
-        .assign(День=lambda d: d["DayOfWeek"].map(lambda x: DAY_NAME_RU[x]))
-        .assign(Отметка=lambda d: np.where(d["Star"], "🚫 пропуск", "✔ работа"))
-        .drop(columns=["DayOfWeek", "Star"])
-        .rename(columns={"Date": "Дата", "Hours": "Часы", "Rate": "Ставка",
-                         "Amount": "Сумма"})
-    )
-    detail["Дата"] = detail["Дата"].dt.strftime("%d.%m.%Y")
-    detail["Сумма"] = detail["Сумма"].map(lambda x: f"{x:,.0f} ₽")
-    detail["Ставка"] = detail["Ставка"].map(lambda x: f"{x:,.0f} ₽")
-    detail["Часы"] = detail["Часы"].map(lambda x: f"{x:,.1f}".replace(",", " ").strip())
-    detail = detail.rename(columns={"Отметка": "Статус"})
-    st.dataframe(detail, width="stretch", hide_index=True)
+if single is not None:
+    # ════════════════ ДОСЬЕ ВЫБРАННОГО ════════════════
+    with tabs[person_i]:
+        st.subheader(f"👤 {single}")
+        render_dossier(single)
 
 # ════════════════ ПО КАЛЕНДАРЮ ════════════════
-with tabs[2]:
+with tabs[cal_i]:
     st.subheader("🔥 Матрица «Сотрудники × Дни» (часы)")
     pivot = f.pivot_table(
         index="Employee", columns="Date", values="Hours",
@@ -811,7 +869,7 @@ with tabs[2]:
     )
 
 # ════════════════ ПРОПУСКИ ════════════════
-with tabs[3]:
+with tabs[skip_i]:
     st.subheader("🚫 Пропуски и отметки «*»")
     if "Star" in f.columns and f["Star"].any():
         miss = (
